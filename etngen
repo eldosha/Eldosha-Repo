@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ETN-128 Generator — Beta Preview</title>
+<style>
+  :root{--bg:#0f1724;--card:#0b1220;--accent:#7c3aed;--muted:#9aa4b2;--ok:#10b981}
+  body{margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;background:linear-gradient(180deg,#071024,#081025);color:#e6eef8}
+  .wrap{max-width:920px;margin:36px auto;padding:24px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px;box-shadow:0 6px 30px rgba(2,6,23,0.6)}
+  h1{margin:0 0 8px;font-size:20px}
+  p.lead{margin:4px 0 18px;color:var(--muted)}
+  label{display:block;margin-top:12px;color:var(--muted);font-size:13px}
+  input[type=text], textarea, select{width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit;font-size:14px}
+  button{background:var(--accent);color:white;border:0;padding:10px 12px;border-radius:8px;cursor:pointer;margin-right:8px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .col{flex:1;min-width:260px}
+  .out{margin-top:14px;padding:12px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);font-family:monospace;white-space:pre-wrap;word-break:break-word}
+  .meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;color:var(--muted);font-size:13px}
+  footer{margin-top:18px;color:var(--muted);font-size:13px}
+  .note{margin-top:10px;color:#ffd47a;background:rgba(255,210,122,0.06);padding:8px;border-radius:8px}
+  .small{font-size:12px;color:var(--muted)}
+  .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
+  .success{color:var(--ok)}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>ETN-128 Generator — Beta Preview</h1>
+    <p class="lead">Client-side preview generator. Generates ETN-128 tokens (28-char user prefix + 100-char random tail). Uses Web Crypto for RNG. <span class="small">(Production: do prefix HMAC on server with secret.)</span></p>
+
+    <label for="userId">User ID (letters + numbers, e.g. <code>shayan581jdpav19r</code>)</label>
+    <input id="userId" type="text" placeholder="type user id" value="shayan581jdpav19r" />
+
+    <div style="display:flex;gap:12px;margin-top:12px;align-items:center;">
+      <button id="genBtn">Generate ETN-128</button>
+      <button id="copyBtn" class="btn-ghost">Copy token</button>
+      <button id="dlBtn" class="btn-ghost">Download .txt</button>
+      <div style="flex:1"></div>
+      <div class="small">Emoji ratio: <strong>1:16 (≈1 per 17)</strong> · Tail length: <strong>100</strong></div>
+    </div>
+
+    <div class="out" id="tokenOut">Press "Generate ETN-128"</div>
+
+    <div class="meta" id="meta">
+      <div>Chars: —</div>
+      <div>Bytes (UTF-8): —</div>
+      <div>SHA-256: —</div>
+      <div id="prefixHint">Prefix(28): —</div>
+    </div>
+
+    <div class="note">
+      <strong>Preview notes:</strong> This page is for local preview/demo only. In production:
+      <ul>
+        <li>Compute prefix server-side with <code>HMAC_SHA256(server_secret, user_id)</code></li>
+        <li>Do not store plaintext tokens in non-encrypted DB; use KMS/HSM as discussed.</li>
+        <li>This client uses SHA-256 (SubtleCrypto) only for deterministic prefix & display hash.</li>
+      </ul>
+    </div>
+
+    <footer>
+      Built for EldoriaTokenNetwork · Beta preview · Run on GitHub Pages (static)
+    </footer>
+  </div>
+
+<script>
+// ---------- alphabet config ----------
+const PERSIAN = "اآبپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی";
+const RUSSIAN = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
+const EN_LO = "abcdefghijklmnopqrstuvwxyz";
+const EN_HI = EN_LO.toUpperCase();
+const DIGITS_ASCII = "0123456789";
+const DIGITS_PERSIAN = "۰۱۲۳۴۵۶۷۸۹";
+const SYMBOLS = "!@#$%^&*()-_=+[]{}<>:;,.?/|\\~`";
+
+// Emoji set (curated) — exclude Israel flag and Jewish symbols (🇮🇱, ✡, 🕎, 🕍)
+const EMOJIS = [
+  "😀","😃","😄","😁","😆","😅","😂","🙂","🙃","😉",
+  "😊","😇","🥰","😍","🤩","😘","😗","😚","😙","🤗",
+  "😎","🤓","🧐","😏","😴","🤤","😪","😵","🤯","😳",
+  "😬","😡","😠","🤬","😭","😢","😥","😓","🤒","🤕",
+  "🤖","👻","💀","💩","🔥","✨","⭐","🌟","💫",
+  "🎉","🎊","❤️","🧡","💛","💚","💙","💜","🖤","🤍",
+  "🤎","🫶","👍","👎","👌","✌️","🤞","🙏","👏","💪",
+  "🌈","☀️","🌙","⚡","☂️","🌊","🍀","🌹","🌺","🌸",
+  "🍎","🍕","🍔","🍣","☕","🍺","🎵","🎶","🎧","🎤",
+  "🪐","🌍","🌎","🌏","🚀","✈️","🚗","🚲","🏆","🏅",
+  "📷","📱","💡","🔒","🔑","🧭","📦","🧪","🧲","🛠️",
+  "🧩","🧸","🎮","🖼️","📚","✏️","🧵","🪢","🛒","🏡"
+];
+
+// Build alphabet array with normalization and dedupe
+function buildAlphabet(){
+  const base = PERSIAN + RUSSIAN + EN_LO + EN_HI + DIGITS_ASCII + DIGITS_PERSIAN + SYMBOLS;
+  const arr = Array.from(base);
+  const emojiArr = EMOJIS.map(e => e.normalize('NFC'));
+  const all = arr.concat(emojiArr);
+  const seen = new Set(); const out = [];
+  for (const ch of all){
+    const n = ch.normalize ? ch.normalize('NFC') : ch;
+    if (!seen.has(n)){ seen.add(n); out.push(n); }
+  }
+  return out;
+}
+const ALPHABET = buildAlphabet();
+const ALPHABET_SIZE = ALPHABET.length;
+
+// Build emoji-only and non-emoji alphabets
+const EMOJI_SET = new Set(EMOJIS.map(e => e.normalize('NFC')));
+const EMOJI_ALPHABET = ALPHABET.filter(c => EMOJI_SET.has(c));
+const NON_EMOJI_ALPHABET = ALPHABET.filter(c => !EMOJI_SET.has(c));
+
+// ---------- secure random helpers ----------
+function randomUint32(){
+  const a = new Uint32Array(1);
+  crypto.getRandomValues(a);
+  return a[0];
+}
+function secureRandomInt(max){
+  // return integer in [0, max)
+  if (max <= 0) throw new Error("max positive");
+  const limit = Math.floor(0x100000000 / max) * max;
+  while (true){
+    const r = randomUint32();
+    if (r < limit) return r % max;
+  }
+}
+function secureChoice(arr){
+  return arr[secureRandomInt(arr.length)];
+}
+function secureShuffle(array){
+  // Fisher-Yates using secure RNG
+  for (let i = array.length - 1; i > 0; i--){
+    const j = secureRandomInt(i + 1);
+    const t = array[i]; array[i] = array[j]; array[j] = t;
+  }
+  return array;
+}
+
+// ---------- crypto helpers ----------
+async function sha256Hex(str){
+  const enc = new TextEncoder();
+  const data = enc.encode(str);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return bufferToHex(hash);
+}
+function bufferToHex(buf){
+  const bytes = new Uint8Array(buf);
+  return Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+function bufferToBigInt(buf){
+  const bytes = new Uint8Array(buf);
+  let n = 0n;
+  for (const b of bytes){ n = (n << 8n) + BigInt(b); }
+  return n;
+}
+
+// Convert BigInt to base-N digits length 'len'
+function bigintToBaseN(bi, base, len){
+  const digits = Array(len).fill(0);
+  let i = len - 1;
+  let n = BigInt(bi);
+  const B = BigInt(base);
+  while (n > 0n && i >= 0){
+    digits[i] = Number(n % B);
+    n = n / B;
+    i--;
+  }
+  return digits;
+}
+
+// Encode user id to deterministic 28-char prefix using SHA-256 (preview)
+async function encodeUserIdToPrefix(userId){
+  // Note: production -> use HMAC(server_secret, userId) on server
+  const enc = new TextEncoder().encode(String(userId));
+  const digest = await crypto.subtle.digest('SHA-256', enc);
+  const big = bufferToBigInt(digest);
+  const digits = bigintToBaseN(big, ALPHABET_SIZE, 28);
+  const chars = digits.map(d => ALPHABET[d % ALPHABET_SIZE]);
+  return chars.join('');
+}
+
+// generate random tail with emoji ratio = 1:16 -> emoji fraction = 1/(1+16) = 1/17
+function generateRandomTail(tailLen = 100){
+  const emojiCount = Math.floor(tailLen / 17); // ~5 for 100
+  const otherCount = tailLen - emojiCount;
+  const chars = [];
+  for (let i=0;i<emojiCount;i++) chars.push(secureChoice(EMOJI_ALPHABET));
+  for (let i=0;i<otherCount;i++) chars.push(secureChoice(NON_EMOJI_ALPHABET));
+  secureShuffle(chars);
+  return chars.join('');
+}
+
+// proper character length using codepoints
+function codepoints(str){ return Array.from(str); }
+
+// ---------- UI wiring ----------
+const genBtn = document.getElementById('genBtn');
+const tokenOut = document.getElementById('tokenOut');
+const meta = document.getElementById('meta');
+const userIdInput = document.getElementById('userId');
+const copyBtn = document.getElementById('copyBtn');
+const dlBtn = document.getElementById('dlBtn');
+const prefixHint = document.getElementById('prefixHint');
+
+async function generateAndRender(){
+  const userId = userIdInput.value.trim();
+  if (!userId){ alert('enter user id'); return; }
+  // simple validation: allow letters+numbers only for prefix seed
+  if (!/^[A-Za-z0-9_:-]{3,32}$/.test(userId)){
+    if (!confirm('user id seems to contain special chars or be long — continue?')){}
+  }
+
+  genBtn.disabled = true;
+  genBtn.textContent = 'Generating…';
+
+  try {
+    const prefix = await encodeUserIdToPrefix(userId);
+    const tail = generateRandomTail(100);
+    const token = prefix + tail;
+    const cpLen = codepoints(token).length;
+    const byteLen = new TextEncoder().encode(token).length;
+    const hash = await sha256Hex(token);
+
+    tokenOut.textContent = token;
+    meta.children[0].textContent = `Chars: ${cpLen}`;
+    meta.children[1].textContent = `Bytes (UTF-8): ${byteLen}`;
+    meta.children[2].textContent = `SHA-256: ${hash}`;
+    prefixHint.textContent = `Prefix(28): ${prefix}`;
+  } catch (err){
+    tokenOut.textContent = 'Error: ' + String(err);
+  } finally {
+    genBtn.disabled = false;
+    genBtn.textContent = 'Generate ETN-128';
+  }
+}
+
+genBtn.addEventListener('click', generateAndRender);
+
+copyBtn.addEventListener('click', async ()=>{
+  const txt = tokenOut.textContent || '';
+  if (!txt) return;
+  await navigator.clipboard.writeText(txt);
+  copyBtn.textContent = 'Copied!';
+  setTimeout(()=> copyBtn.textContent = 'Copy token', 1200);
+});
+
+dlBtn.addEventListener('click', ()=>{
+  const txt = tokenOut.textContent || '';
+  if (!txt) return;
+  const blob = new Blob([txt], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'etn-128.txt'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 500);
+});
+
+// init sample
+generateAndRender();
+
+</script>
+</body>
+</html>
